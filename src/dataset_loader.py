@@ -88,6 +88,17 @@ def _load_triviaqa() -> List[str]:
     return questions
 
 
+# Hugging Face revisions the corpora are downloaded at.  Without a pin a
+# dataset can change upstream and silently change the experiment; the commit
+# hashes below are the heads observed on 2026-11-05.  If the paper's numbers
+# were produced from earlier snapshots, replace them with those hashes.
+HF_REVISIONS = {
+    "EdinburghNLP/xsum": "7d4d486c2f8ef850b1a11aead99b894ff3dd7da9",
+    "Helsinki-NLP/opus-100": "805090dc28bf78897da9641cdf08b61287580df9",
+    "NousResearch/hermes-function-calling-v1": "dae3e1d28cfbcf4b915c04ea1e072030529b4bda",
+}
+
+
 # ---------------------------------------------------------------------------
 # HuggingFace loaders (download once, cache as JSON)
 # ---------------------------------------------------------------------------
@@ -102,7 +113,8 @@ def _load_xsum() -> List[str]:
 
     from datasets import load_dataset  # type: ignore[import]
 
-    ds = load_dataset("EdinburghNLP/xsum", split="test", trust_remote_code=False)
+    ds = load_dataset("EdinburghNLP/xsum", split="test", trust_remote_code=False,
+                      revision=HF_REVISIONS["EdinburghNLP/xsum"])
     texts = [
         f"Summarize the following article:\n{row['document'][:500]}"
         for row in ds
@@ -126,6 +138,7 @@ def _load_opus100() -> List[str]:
     ds = load_dataset(
         "Helsinki-NLP/opus-100", "en-fr",
         split="test", trust_remote_code=False,
+        revision=HF_REVISIONS["Helsinki-NLP/opus-100"],
     )
     texts = [
         f"Translate from English to French:\n{row['translation']['en']}"
@@ -154,6 +167,7 @@ def _load_hermes_fc() -> List[str]:
     ds = load_dataset(
         "NousResearch/hermes-function-calling-v1",
         split="train", trust_remote_code=False,
+        revision=HF_REVISIONS["NousResearch/hermes-function-calling-v1"],
     )
     texts: List[str] = []
     for row in ds:
