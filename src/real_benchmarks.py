@@ -25,13 +25,19 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import io
 import json
+import logging
+import os
+import pickle
 import re
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
+
+logger = logging.getLogger(__name__)
 
 EXTERNAL = Path("data/external")
 PROCESSED = EXTERNAL / "processed"
@@ -214,8 +220,53 @@ def build_sprout(root: Path = EXTERNAL) -> tuple[pd.DataFrame, pd.DataFrame]:
     return _finish(items, pd.concat(rows, ignore_index=True), SPROUT_DOMAINS)
 
 
+class _RestrictedUnpickler(pickle.Unpickler):
+    """Unpickler that resolves only the classes a pandas DataFrame needs.
+
+    The RouterBench table is a pickle downloaded from a third-party repository;
+    plain ``pd.read_pickle`` would execute whatever code such a file carries.
+    This is defence in depth, not a sandbox: it refuses os, subprocess,
+    builtins.eval and every other global outside pandas/numpy internals.
+    """
+
+    _PREFIXES = ("pandas.core.", "pandas._libs.", "pandas.arrays", "numpy.")
+    _NAMES = {
+        ("numpy", "dtype"), ("numpy", "ndarray"),
+        ("pandas", "DataFrame"), ("pandas", "Series"), ("pandas", "Index"),
+        ("pandas", "MultiIndex"), ("pandas", "RangeIndex"), ("pandas", "StringDtype"),
+        ("pandas", "Timestamp"), ("pandas", "Timedelta"),
+        ("pyarrow.lib", "_restore_array"), ("pyarrow.lib", "py_buffer"),
+        ("pyarrow.lib", "type_for_alias"),
+        ("builtins", "slice"), ("builtins", "range"), ("builtins", "set"),
+        ("builtins", "frozenset"), ("builtins", "complex"), ("builtins", "bytearray"),
+        ("collections", "OrderedDict"), ("_codecs", "encode"), ("datetime", "datetime"),
+        ("datetime", "date"), ("datetime", "timedelta"),
+    }
+
+    def find_class(self, module, name):
+        if module.startswith(self._PREFIXES) or (module, name) in self._NAMES:
+            return super().find_class(module, name)
+        raise pickle.UnpicklingError(f"blocked global {module}.{name} in pickle")
+
+
+def read_trusted_dataframe(path: Path) -> pd.DataFrame:
+    """Load a DataFrame pickle without executing arbitrary code.
+
+    Set ROUTERBENCH_UNSAFE_PICKLE=1 to fall back to ``pd.read_pickle`` for a
+    file you have verified yourself.
+    """
+    if os.environ.get("ROUTERBENCH_UNSAFE_PICKLE") == "1":
+        logger.warning("Loading %s with unrestricted pickle (ROUTERBENCH_UNSAFE_PICKLE=1)", path)
+        return pd.read_pickle(path)
+    with open(path, "rb") as handle:
+        frame = _RestrictedUnpickler(io.BytesIO(handle.read())).load()
+    if not isinstance(frame, pd.DataFrame):
+        raise ValueError(f"{path} does not contain a DataFrame")
+    return frame
+
+
 def build_routerbench(root: Path = EXTERNAL) -> tuple[pd.DataFrame, pd.DataFrame]:
-    raw = pd.read_pickle(root / "routerbench" / ROUTERBENCH_FILE)
+    raw = read_trusted_dataframe(root / "routerbench" / ROUTERBENCH_FILE)
     raw = raw.drop_duplicates("sample_id")
     models = [c for c in raw.columns
               if "|" not in c and c not in {"sample_id", "prompt", "eval_name", "oracle_model_to_route_to"}]
