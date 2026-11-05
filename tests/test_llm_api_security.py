@@ -14,6 +14,21 @@ from src.llm_api import (
     validate_endpoint,
 )
 
+class EnvIsolated(unittest.TestCase):
+    """Run each test without LLM_* variables, so the result does not depend on the caller's environment.
+
+    CI sets LLM_MAX_CALLS=0 as a safety net against real calls; tests that
+    drive a stubbed client must not inherit it.
+    """
+
+    def setUp(self):
+        patcher = mock.patch.dict(os.environ)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        for key in [k for k in os.environ if k.startswith("LLM_")]:
+            del os.environ[key]
+
+
 GOOD = {"m": "https://api.groq.com/openai/v1"}
 KEYS = {"m": "k-config"}
 
@@ -36,7 +51,7 @@ def ok_body(text="hi"):
     return {"choices": [{"message": {"content": text}}]}
 
 
-class TestEndpointValidation(unittest.TestCase):
+class TestEndpointValidation(EnvIsolated):
     def test_rejects_plain_http_and_unknown_hosts(self):
         for url in ("http://api.groq.com/v1", "https://evil.example/v1",
                     "https://api.groq.com.evil.example/v1", "ftp://api.groq.com", "api.groq.com/v1"):
@@ -58,7 +73,7 @@ class TestEndpointValidation(unittest.TestCase):
             LLMAPIClient({"m": "https://llm.example.org/v1"}, KEYS)
 
 
-class TestKeysFromEnvironment(unittest.TestCase):
+class TestKeysFromEnvironment(EnvIsolated):
     def test_precedence(self):
         with mock.patch.dict(os.environ, {}, clear=True):
             self.assertEqual(api_key_from_env("qwen2.5-72b", "cfg"), "cfg")
@@ -76,7 +91,7 @@ class TestKeysFromEnvironment(unittest.TestCase):
         self.assertFalse(post.call_args.kwargs["allow_redirects"])
 
 
-class TestConfigModuleAllowlist(unittest.TestCase):
+class TestConfigModuleAllowlist(EnvIsolated):
     def test_only_llm_config_modules(self):
         for name in ("os", "subprocess", "../llm_config", "llm_config.__init__", "my_llm_config", "llm_config; x"):
             with self.assertRaises(ValueError, msg=name):
@@ -87,7 +102,7 @@ class TestConfigModuleAllowlist(unittest.TestCase):
             import_config_module("llm_config_does_not_exist", "src")
 
 
-class TestBudgetAndResponses(unittest.TestCase):
+class TestBudgetAndResponses(EnvIsolated):
     def test_budget_stops_before_the_request(self):
         client = LLMAPIClient(GOOD, KEYS, max_calls=2)
         with mock.patch.object(requests, "post", return_value=FakeResponse(ok_body())) as post:
