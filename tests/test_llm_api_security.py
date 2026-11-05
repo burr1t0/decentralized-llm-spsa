@@ -74,13 +74,39 @@ class TestEndpointValidation(EnvIsolated):
 
 
 class TestKeysFromEnvironment(EnvIsolated):
+    OPENROUTER = "https://openrouter.ai/api/v1"
+    GROQ = "https://api.groq.com/openai/v1"
+
     def test_precedence(self):
         with mock.patch.dict(os.environ, {}, clear=True):
-            self.assertEqual(api_key_from_env("qwen2.5-72b", "cfg"), "cfg")
-        with mock.patch.dict(os.environ, {"LLM_API_KEY": "generic"}, clear=True):
-            self.assertEqual(api_key_from_env("qwen2.5-72b", "cfg"), "generic")
-        with mock.patch.dict(os.environ, {"LLM_API_KEY": "generic", "LLM_API_KEY_QWEN2_5_72B": "specific"}, clear=True):
-            self.assertEqual(api_key_from_env("qwen2.5-72b", "cfg"), "specific")
+            self.assertEqual(api_key_from_env("qwen2.5-72b", "cfg", self.GROQ), "cfg")
+        with mock.patch.dict(os.environ, {"LLM_API_KEY_QWEN2_5_72B": "specific", "LLM_API_KEY": "or-key"}, clear=True):
+            self.assertEqual(api_key_from_env("qwen2.5-72b", "cfg", self.GROQ), "specific")
+            self.assertEqual(api_key_from_env("qwen2.5-72b", "cfg", self.OPENROUTER), "specific")
+
+    def test_generic_key_is_only_for_openrouter(self):
+        with mock.patch.dict(os.environ, {"LLM_API_KEY": "or-key"}, clear=True):
+            self.assertEqual(api_key_from_env("m", "cfg", self.OPENROUTER), "or-key")
+            # another provider keeps its own key and never receives the OpenRouter one
+            self.assertEqual(api_key_from_env("m", "groq-key", self.GROQ), "groq-key")
+            self.assertEqual(api_key_from_env("m", "groq-key", "https://api.deepseek.com/v1"), "groq-key")
+            self.assertIsNone(api_key_from_env("m", None, self.GROQ))
+            self.assertIsNone(api_key_from_env("m", None))
+
+    def test_generic_key_not_sent_to_other_provider(self):
+        client = LLMAPIClient({"a": self.OPENROUTER, "b": self.GROQ}, {"a": "x", "b": "groq-key"})
+        seen = {}
+
+        def fake_post(url, json=None, headers=None, **kwargs):
+            seen[url] = headers["Authorization"]
+            return FakeResponse(ok_body())
+
+        with mock.patch.dict(os.environ, {"LLM_API_KEY": "or-key"}), \
+                mock.patch.object(requests, "post", side_effect=fake_post):
+            client.call("a", "p", "t")
+            client.call("b", "p", "t")
+        self.assertEqual(seen[self.OPENROUTER + "/chat/completions"], "Bearer or-key")
+        self.assertEqual(seen[self.GROQ + "/chat/completions"], "Bearer groq-key")
 
     def test_environment_key_is_sent_in_header(self):
         client = LLMAPIClient(GOOD, KEYS)

@@ -46,14 +46,22 @@ def validate_endpoint(base_url: str, allowed_hosts) -> None:
     )
 
 
-def api_key_from_env(model_name: str, configured: Optional[str]) -> Optional[str]:
-    """Key for a model: LLM_API_KEY_<MODEL> from the environment, else LLM_API_KEY, else the config value.
+def api_key_from_env(model_name: str, configured: Optional[str], base_url: Optional[str] = None) -> Optional[str]:
+    """Key for a model, in order: LLM_API_KEY_<MODEL>, LLM_API_KEY (OpenRouter models only), the config value.
 
     The model name is upper-cased with non-alphanumerics replaced by '_',
     e.g. "qwen2.5-72b-instruct" -> LLM_API_KEY_QWEN2_5_72B_INSTRUCT.
+    LLM_API_KEY is the OpenRouter key: it is never used for a model served by
+    another provider, because a key must only reach the host it belongs to.
     """
     suffix = re.sub(r"[^A-Za-z0-9]", "_", model_name).upper()
-    return os.environ.get(f"LLM_API_KEY_{suffix}") or os.environ.get("LLM_API_KEY") or configured
+    specific = os.environ.get(f"LLM_API_KEY_{suffix}")
+    if specific:
+        return specific
+    host = (urlparse(base_url).hostname or "").lower() if base_url else ""
+    if host == "openrouter.ai" and os.environ.get("LLM_API_KEY"):
+        return os.environ["LLM_API_KEY"]
+    return configured
 
 
 def import_config_module(config_name: str, package: Optional[str]):
@@ -140,7 +148,7 @@ class LLMAPIClient:
         Raises requests.HTTPError on non-2xx responses.
         """
         base_url = self.endpoints.get(model_name)
-        api_key = api_key_from_env(model_name, self.api_keys.get(model_name))
+        api_key = api_key_from_env(model_name, self.api_keys.get(model_name), base_url)
         if not base_url or not api_key:
             raise ValueError(
                 f"Model '{model_name}' is not configured. "

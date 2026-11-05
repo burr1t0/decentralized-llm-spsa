@@ -37,6 +37,16 @@ class _Evil:
         return (os.system, ("echo pwned > /dev/null",))
 
 
+class _WriteFile:
+    """Gadget that the earlier prefix-based allow-list let through: DataFrame.to_csv writes a file."""
+
+    def __init__(self, target):
+        self.target = target
+
+    def __reduce__(self):
+        return (pd.DataFrame.to_csv, (pd.DataFrame({"a": [1]}), self.target))
+
+
 class TestRestrictedPickle(unittest.TestCase):
     def _dump(self, obj, path):
         with open(path, "wb") as handle:
@@ -56,6 +66,45 @@ class TestRestrictedPickle(unittest.TestCase):
             self._dump(_Evil(), path)
             with self.assertRaises(pickle.UnpicklingError):
                 real_benchmarks.read_trusted_dataframe(path)
+
+    def test_dataframe_method_gadget_cannot_write_a_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "pwned.csv"
+            path = Path(tmp) / "gadget.pkl"
+            self._dump(_WriteFile(str(target)), path)
+            with self.assertRaises(pickle.UnpicklingError):
+                real_benchmarks.read_trusted_dataframe(path)
+            self.assertFalse(target.exists())
+
+    def test_eval_gadget_blocked(self):
+        class Evil:
+            def __reduce__(self):
+                return (pd.eval, ("1 + 1",))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "eval.pkl"
+            self._dump(Evil(), path)
+            with self.assertRaises(pickle.UnpicklingError):
+                real_benchmarks.read_trusted_dataframe(path)
+
+    def test_sha256_must_match_before_anything_is_unpickled(self):
+        import hashlib
+
+        frame = pd.DataFrame({"a": [1, 2]})
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "t.pkl"
+            frame.to_pickle(path)
+            good = hashlib.sha256(path.read_bytes()).hexdigest()
+            pd.testing.assert_frame_equal(real_benchmarks.read_trusted_dataframe(path, good), frame)
+            with self.assertRaisesRegex(ValueError, "SHA-256"):
+                real_benchmarks.read_trusted_dataframe(path, "0" * 64)
+            # a tampered file is refused on the hash alone
+            path.write_bytes(path.read_bytes() + b"x")
+            with self.assertRaisesRegex(ValueError, "SHA-256"):
+                real_benchmarks.read_trusted_dataframe(path, good)
+
+    def test_pinned_hash_is_a_sha256(self):
+        self.assertRegex(real_benchmarks.ROUTERBENCH_SHA256, r"^[0-9a-f]{64}$")
 
     def test_non_dataframe_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
