@@ -753,10 +753,12 @@ class JudgeFallback:
                 raise  # лимит расходов должен остановить прогон, а не стать «сбоем судьи»
             except Exception as exc:
                 # Fallback-режим: эвристический судья. Сбой считается и логируется,
-                # чтобы долю таких оценок можно было указать в статье.
-                key = "parse_failed" if isinstance(exc, JudgeParseError) else "api_failed"
-                self.judge_stats[key] += 1
-                logger.warning("LLM judge failed (%s): %s; using heuristic fallback", key, exc)
+                # чтобы долю таких оценок можно было указать в статье. Если клиента
+                # нет вовсе (варианты без судьи), это штатный режим, а не сбой.
+                if self.llm_api_client is not None:
+                    key = "parse_failed" if isinstance(exc, JudgeParseError) else "api_failed"
+                    self.judge_stats[key] += 1
+                    logger.warning("LLM judge failed (%s): %s; using heuristic fallback", key, exc)
                 S_i = float(np.clip(base_success, 0.0, 1.0))
                 conf = 0.4
                 Q = self.ALPHA_Q * S_i + self.BETA_Q * T_i

@@ -119,6 +119,13 @@ class TestJudgeEvaluateFallbackAccounting(unittest.TestCase):
         self.assertEqual(judge.judge_stats["api_failed"], 1)
         self.assertEqual(judge.judge_stats["parse_failed"], 0)
 
+    def test_no_client_is_normal_mode_not_a_failure(self):
+        judge = JudgeFallback(PROFILES, llm_api_client=None)
+        with self.assertNoLogs("src.main", level="WARNING"):
+            result = judge.evaluate(0, make_task(), base_success=0.7, latency=1.0, model_output="ans")
+        self.assertEqual(judge.judge_stats, {"llm_ok": 0, "parse_failed": 0, "api_failed": 0})
+        self.assertAlmostEqual(result["confidence"], 0.4)
+
     def test_budget_exceeded_stops_the_run_instead_of_falling_back(self):
         from src.llm_api import BudgetExceeded
 
