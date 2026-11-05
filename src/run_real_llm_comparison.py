@@ -57,7 +57,7 @@ import pandas as pd
 
 try:
     from .main import ExactOrchestrator, SimulationVariant, PROFILES
-    from .llm_api import LLMAPIClient
+    from .llm_api import LLMAPIClient, BudgetExceeded, import_config_module
     from .run_spsa_comparison import (
         SPSA_VARIANTS, generate_tasks, BEST_PARAMS, _build_variant,
     )
@@ -66,7 +66,7 @@ except ImportError:
     import sys as _sys
     _sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from main import ExactOrchestrator, SimulationVariant, PROFILES
-    from llm_api import LLMAPIClient
+    from llm_api import LLMAPIClient, BudgetExceeded, import_config_module
     from run_spsa_comparison import (
         SPSA_VARIANTS, generate_tasks, BEST_PARAMS, _build_variant,
     )
@@ -194,6 +194,9 @@ class PromptCachingLLMClient:
         self.misses += 1
         try:
             result = self._raw.call(model_name, prompt, task_type)
+        except BudgetExceeded:
+            # A spending cap must stop the run, not be absorbed as one more fallback.
+            raise
         except Exception as exc:
             logger.warning("API call failed (%s) — using fallback result.", exc)
             result = {"output": "", "success": False, "latency": 5.0}
@@ -293,11 +296,7 @@ class PromptCachingLLMClient:
 # ---------------------------------------------------------------------------
 
 def _load_api_config(config_name: str = "llm_config") -> Tuple[dict, dict, dict, str, dict, dict]:
-    import importlib
-    try:
-        cfg = importlib.import_module(f".{config_name}", package=__package__)
-    except ImportError:
-        cfg = importlib.import_module(config_name)
+    cfg = import_config_module(config_name, __package__)
     logger.info("Loaded API config from module: %s", config_name)
     return (
         getattr(cfg, "LLM_ENDPOINTS", {}),
@@ -312,11 +311,13 @@ def _load_api_config(config_name: str = "llm_config") -> Tuple[dict, dict, dict,
 def _build_clients(
     min_interval_s: float = 2.5,
     config_name: str = "llm_config",
+    max_calls: Optional[int] = None,
 ) -> Tuple[PromptCachingLLMClient, str, dict]:
     endpoints, api_keys, aliases, judge_model, latency_profiles, max_tokens = _load_api_config(config_name)
     raw_base = LLMAPIClient(
         endpoints, api_keys, model_aliases=aliases,
         max_tokens_per_model=max_tokens, timeout=90,
+        max_calls=max_calls,
     )
     raw = _RateLimitedClient(raw_base, min_interval_s=min_interval_s)
     return PromptCachingLLMClient(raw), judge_model, latency_profiles
@@ -739,6 +740,7 @@ def run_real_llm_comparison(
     config_name: str = "llm_config",
     log_file: Optional[str] = None,
     spsa_interval: int = 5,
+    max_api_calls: Optional[int] = None,
 ) -> None:
     root = Path(output_dir)
     root.mkdir(parents=True, exist_ok=True)
@@ -769,6 +771,7 @@ def run_real_llm_comparison(
 
     caching_client, judge_model, latency_profiles = _build_clients(
         min_interval_s=rate_interval_s, config_name=config_name,
+        max_calls=max_api_calls,
     )
 
     # Approach A: inject simulated latency profiles after real API calls
@@ -916,6 +919,9 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--config",   type=str,  default="llm_config",
                    help="Config module name: 'llm_config' (Groq+OpenAI) or "
                         "'llm_config_openrouter' (Groq+OpenRouter free).")
+    p.add_argument("--max-api-calls", type=int, default=None,
+                   help="Hard cap on paid API requests; the run stops with BudgetExceeded "
+                        "when it is reached (default: LLM_MAX_CALLS, else no cap).")
     p.add_argument("--dry-run",  action="store_true",
                    help="Send one test call per model and exit.")
     p.add_argument("--rate-interval", type=float, default=3.0,
@@ -947,4 +953,5 @@ if __name__ == "__main__":
         config_name     = args.config,
         log_file        = args.log_file,
         spsa_interval   = args.spsa_interval,
+        max_api_calls   = args.max_api_calls,
     )

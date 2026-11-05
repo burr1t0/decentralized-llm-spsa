@@ -119,6 +119,13 @@ class TestJudgeEvaluateFallbackAccounting(unittest.TestCase):
         self.assertEqual(judge.judge_stats["api_failed"], 1)
         self.assertEqual(judge.judge_stats["parse_failed"], 0)
 
+    def test_budget_exceeded_stops_the_run_instead_of_falling_back(self):
+        from src.llm_api import BudgetExceeded
+
+        judge = make_judge(BudgetExceeded("cap"))
+        with self.assertRaises(BudgetExceeded):
+            judge.evaluate(0, make_task(), base_success=0.7, latency=1.0, model_output="ans")
+
 
 if __name__ == "__main__":
     unittest.main()

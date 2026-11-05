@@ -17,8 +17,10 @@ from collections import deque
 
 try:
     from .spsa_variants import call_variant, reset_state as _reset_spsa_state, VARIANT_DESCRIPTIONS
+    from .llm_api import BudgetExceeded
 except ImportError:
     from spsa_variants import call_variant, reset_state as _reset_spsa_state, VARIANT_DESCRIPTIONS
+    from llm_api import BudgetExceeded
 
 # =============================================================================
 # 1. РЕАЛЬНЫЕ ПРОФИЛИ АГЕНТОВ (из бенчмарков 2025-2026)
@@ -747,6 +749,8 @@ class JudgeFallback:
                 # Гибрид: качество ответа от judge + своевременность из telemetry.
                 Q = 0.75 * semantic_q + 0.25 * T_i
                 self.judge_stats["llm_ok"] += 1
+            except BudgetExceeded:
+                raise  # лимит расходов должен остановить прогон, а не стать «сбоем судьи»
             except Exception as exc:
                 # Fallback-режим: эвристический судья. Сбой считается и логируется,
                 # чтобы долю таких оценок можно было указать в статье.
@@ -1792,6 +1796,8 @@ class ExactOrchestrator:
                     simulation_quality = None
                     output_tokens = max(32, int(len(model_output) / 4)) if model_output else 32
                     semantic_match = self._cosine_similarity(task.phi_i, profile.psi_k)
+                except BudgetExceeded:
+                    raise
                 except Exception:
                     sim_result = self._simulate_no_api_execution(
                         runtime_task,
