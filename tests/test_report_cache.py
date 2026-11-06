@@ -106,6 +106,14 @@ class TestRestrictedPickle(unittest.TestCase):
     def test_pinned_hash_is_a_sha256(self):
         self.assertRegex(real_benchmarks.ROUTERBENCH_SHA256, r"^[0-9a-f]{64}$")
 
+    @unittest.skipUnless((real_benchmarks.EXTERNAL / "routerbench" / real_benchmarks.ROUTERBENCH_FILE).exists(),
+                         "RouterBench file absent; fetch with python -m src.real_benchmarks routerbench --download")
+    def test_real_routerbench_file_loads_under_the_restricted_loader(self):
+        path = real_benchmarks.EXTERNAL / "routerbench" / real_benchmarks.ROUTERBENCH_FILE
+        frame = real_benchmarks.read_trusted_dataframe(path, real_benchmarks.ROUTERBENCH_SHA256)
+        self.assertIn("sample_id", frame.columns)
+        self.assertGreater(len(frame), 30000)
+
     def test_non_dataframe_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "list.pkl"
