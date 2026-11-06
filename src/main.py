@@ -995,6 +995,8 @@ class ExactOrchestrator:
             'latency': [], 'deadline_hits': [], 'costs': [], 'weighted_success': [],
             'routing_objective': [],
         }
+        # Реальные вызовы LLM и случаи, когда сбой API заменён смоделированным результатом.
+        self.api_stats = {"calls": 0, "simulated_after_failure": 0, "failed": 0}
         self.controller_Q_sums = {j: 0.0 for j in range(num_ctrl)}
         self.controller_Q_counts = {j: 0 for j in range(num_ctrl)}
         self.controller_Q_mse_sums = {j: 0.0 for j in range(num_ctrl)}
@@ -1604,8 +1606,17 @@ class ExactOrchestrator:
         success_count = float(np.sum(self.metrics['success_rate'])) if self.metrics['success_rate'] else 0.0
         total_cost = float(np.sum(self.metrics['costs'])) if self.metrics['costs'] else 0.0
         mean_q = self._safe_mean(self.metrics['judge_quality'])
+        api_calls = self.api_stats["calls"]
         return {
             'variant': self.variant.name,
+            # Доля исходов, подменённых симуляцией после сбоя API, и сбои судьи: их нужно указывать вместе с результатами.
+            'api_calls': float(api_calls),
+            'api_simulated_after_failure': float(self.api_stats["simulated_after_failure"]),
+            'api_failed_calls': float(self.api_stats["failed"]),
+            'api_simulated_rate': (self.api_stats["simulated_after_failure"] / api_calls) if api_calls else 0.0,
+            'judge_llm_ok': float(self.judge.judge_stats["llm_ok"]),
+            'judge_parse_failed': float(self.judge.judge_stats["parse_failed"]),
+            'judge_api_failed': float(self.judge.judge_stats["api_failed"]),
             'success_rate': self._safe_mean(self.metrics['success_rate']),
             'mean_q': mean_q,
             'mean_latency': self._safe_mean(self.metrics['latency']),
@@ -1787,6 +1798,7 @@ class ExactOrchestrator:
                 prompt = task.text or f"{task.type.name}: complexity={task.h_Ti:.2f}, urgency={task.urgency:.2f}"
                 try:
                     api_result = self.llm_api_client.call(profile.model_name, prompt, task.type.name)
+                    self.api_stats["calls"] += 1
                     api_success = bool(api_result.get("success", True))
                     agent_wait = max(0.0, selected.available_at - decision_time)
                     actual_wait = dispatch_wait + dispatch_service + agent_wait
@@ -1800,7 +1812,15 @@ class ExactOrchestrator:
                     semantic_match = self._cosine_similarity(task.phi_i, profile.psi_k)
                 except BudgetExceeded:
                     raise
-                except Exception:
+                except Exception as exc:
+                    # Раньше сбой реального вызова молча заменялся смоделированным результатом,
+                    # и в выходных данных их нельзя было отличить. Теперь это считается и логируется.
+                    self.api_stats["calls"] += 1
+                    self.api_stats["simulated_after_failure"] += 1
+                    logger.warning(
+                        "LLM call to %s failed (%s: %s); the outcome is SIMULATED (%d so far)",
+                        profile.model_name, type(exc).__name__, exc, self.api_stats["simulated_after_failure"],
+                    )
                     sim_result = self._simulate_no_api_execution(
                         runtime_task,
                         selected,
