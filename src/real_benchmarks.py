@@ -44,11 +44,11 @@ EXTERNAL = Path("data/external")
 PROCESSED = EXTERNAL / "processed"
 
 SPROUT_REPO = "CARROT-LLM-Routing/SPROUT"
-SPROUT_REVISION = "d54e3cd"
+SPROUT_REVISION = "d54e3cda2189ca1ed13a877a44ed34736c4b6920"
 SPROUT_FILES = ("data/validation-00000-of-00001.parquet",
                 "data/test-00000-of-00001.parquet")
 ROUTERBENCH_REPO = "withmartian/routerbench"
-ROUTERBENCH_REVISION = "7840214"
+ROUTERBENCH_REVISION = "784021482c3f320c6619ed4b3bb3b41a21424fcb"
 ROUTERBENCH_FILE = "routerbench_0shot.pkl"
 # SHA-256 of that file at ROUTERBENCH_REVISION (the Hub's LFS object id).
 ROUTERBENCH_SHA256 = "ba4f77f19517610a707c374e99322d7750c30fc4ae7ff5527888595a1e65d36d"
@@ -88,7 +88,7 @@ LLMROUTERBENCH_DOMAINS = ("knowledge", "math", "code", "software_engineering",
 # called through their APIs, with the tokens and dollar cost of every call.
 # The published archive is bench-release.tar.gz at HF NPULH/LLMRouterBench.
 LLMROUTERBENCH_REPO = "NPULH/LLMRouterBench"
-LLMROUTERBENCH_REVISION = "0e5af1b"
+LLMROUTERBENCH_REVISION = "0e5af1b84bf73437a01a1849c0f1d2468baa93fc"
 LLMROUTERBENCH_DATASETS = {
     # directory: domain
     "mmlupro/test_3000": "knowledge",
