@@ -183,7 +183,12 @@ class PromptCachingLLMClient:
         self.misses = 0
 
     def _key(self, model_name: str, prompt: str) -> Tuple[str, str]:
-        return (model_name, prompt[:400])
+        # The whole prompt. The key used to be cut to 400 characters, so prompts
+        # that shared a prefix (a judge prompt differs from another only in the
+        # model output at its end) received each other's cached answers.
+        # Caches saved with the old truncated keys still hit for prompts up to
+        # 400 characters and miss for longer ones, which are requested again.
+        return (model_name, prompt)
 
     def call(self, model_name: str, prompt: str, task_type: str) -> dict:
         key = self._key(model_name, prompt)
